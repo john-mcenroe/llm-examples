@@ -3,9 +3,6 @@ import pandas as pd
 import numpy as np
 import openai
 
-# Set a default value for the OpenAI API key for testing purposes
-DEFAULT_API_KEY = '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'
-
 # Sidebar for API key input
 with st.sidebar:
     openai_api_key = st.text_input("OpenAI API Key", key="openai_api_key", type="password")
