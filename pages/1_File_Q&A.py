@@ -4,6 +4,8 @@ import numpy as np
 import openai
 import json
 import itertools
+from tabulate import tabulate
+import plotly.graph_objects as go
 
 # Fixed API key input
 openai_api_key = "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"
@@ -59,7 +61,7 @@ import itertools
 def aggregate_metrics_and_format(df, dimension_columns, measure_column):
     # Check if the measure column exists in the DataFrame.
     if measure_column not in df.columns:
-        st.error(f"Measure column '{measure_column}' does not exist in the DataFrame")
+#        st.error(f"Measure column '{measure_column}' does not exist in the DataFrame")
         return pd.DataFrame()  # Return empty DataFrame as a signal of error
 
     # Convert the measure column to numeric, coercing errors to NaN.
@@ -67,7 +69,7 @@ def aggregate_metrics_and_format(df, dimension_columns, measure_column):
 
     # If the entire measure_column is NaN, there's no point in continuing.
     if df[measure_column].isna().all():
-        st.error(f"Measure column '{measure_column}' contains only NaNs after conversion to numeric.")
+ #       st.error(f"Measure column '{measure_column}' contains only NaNs after conversion to numeric.")
         return pd.DataFrame()  # Return empty DataFrame as a signal of error
 
     results = []
@@ -80,7 +82,7 @@ def aggregate_metrics_and_format(df, dimension_columns, measure_column):
             
             # If temp_df is empty, continue to the next combination
             if temp_df.empty:
-                st.write(f"No data available for dimensions {subset} after dropping NA.")
+#                st.write(f"No data available for dimensions {subset} after dropping NA.")
                 continue
 
             # Group the data by the current subset of dimension columns.
@@ -91,11 +93,11 @@ def aggregate_metrics_and_format(df, dimension_columns, measure_column):
                 aggregated = grouped.agg(measure_median=(measure_column, 'median'),
                                          measure_count=(measure_column, 'count'))
             except Exception as e:
-                st.error(f"Aggregation failed for dimensions {subset}: {e}")
+#                st.error(f"Aggregation failed for dimensions {subset}: {e}")
                 continue
 
             # Debugging output
-            st.write(f'Aggregated DataFrame for dimensions {subset}:', aggregated)
+#            st.write(f'Aggregated DataFrame for dimensions {subset}:', aggregated)
 
             # Concatenate the dimension column names for identification.
             aggregated['dimension_combination'] = ' X '.join(subset)
@@ -105,14 +107,14 @@ def aggregate_metrics_and_format(df, dimension_columns, measure_column):
 
     # If results is empty, there's nothing to concatenate
     if not results:
-        st.error("No aggregated data was produced. Please check your data and dimension columns.")
+#        st.error("No aggregated data was produced. Please check your data and dimension columns.")
         return pd.DataFrame()  # Return empty DataFrame as a signal of error
 
     # Combine all aggregated results into a single DataFrame.
     try:
         final_result = pd.concat(results, ignore_index=True)
     except Exception as e:
-        st.error(f"Concatenation of aggregated data failed: {e}")
+#        st.error(f"Concatenation of aggregated data failed: {e}")
         return pd.DataFrame()  # Return empty DataFrame as a signal of error
 
 
@@ -131,7 +133,6 @@ def aggregate_metrics_and_format(df, dimension_columns, measure_column):
 
     # Sort the filtered results by 'measure_median' in descending order.
     final_result_filtered.sort_values(by='measure_median', ascending=False, inplace=True)
-    st.write('Final sorted DataFrame:', final_result_filtered)
 
     return final_result_filtered
 
@@ -220,28 +221,95 @@ def subset_and_analyze_dimensions(input_df, user_query):
 
     return response.choices[0].message.content
 
+def derive_insights_from_dataset(input_df, user_query):
+    summary_statistics = input_df.describe(include='all').to_json()
+    top_records = input_df.head(50).to_json()
+
+    context = f"""
+        Goal: You are an automated AI analyzer helping a founder identify insights abotu data to answer their question.
+
+    What you do: You analyze an aggregated dataset of user data with theqeustion they want to answer about that data.
+    - You are trying to derive insigths about the data to help user answer their question.
+    - Focus on insights that are nuanced and unique and opinonated. Not things that can be easily seen in the data table which is also visible to the user.
+    - You are trying to provoke engagement from the user and help them identify unique insighs to answer their question.
+    - Make the user who analyzes the data with these insights a master of coming up with hypotheses and understanding their data.
+    - The output will be shown directly inside an AI analysis app where users ask questions about their data and review the responses.
+    - Keep the insights to one liners. Which both call out the insight and say why.
+
+    Other guidelines:
+    - Insights should be short, snappy and opinionated.
+    - Focus on insights across the data or extreme values. Things not easy to spot.
+    - Be opinionated. That is what makes the difference.
+    - Provoke user thought and explortion of the data table and follow ups.
+
+    Parameters:
+    - input_df (pd.DataFrame): The aggregated dataset after applying the aggregate_metrics function.
+    - user_query (str): The user's query or the question they want to answer with the data.
+
+    Returns:
+    - A JSON with insights derived from the dataset, tailored to the user's query.
+    - Make sure the insights are self contained and actionable.
+    - Only return the insights in the JSON. No other information should be included with them.
+    - There should be 5-10 insights returned in the JSON. 
+
+    Given the user's query: "{user_query}", analyze the summarized data and the top records to provide tailored insights. The summarized statistics are as follows: {summary_statistics}. The top records from the dataset are: {top_records}.
+    - How to analyze: Based on the dataset and focusing on the user's query, identify key insights about the dataset, especially focusing on dimensions, measure averages, counts, and any notable trends observed. Rank these insights from high to low based on their importance and potential impact.
+    """
+
+    messages = [
+        {"role": "system", "content": "You are an automated AI analyzer helping a founder identify insights about data to answer their question."},
+        {"role": "user", "content": context}
+    ]
+
+    response = openai.chat.completions.create(
+        model="gpt-3.5-turbo", # "gpt-4-1106-preview",  # or "gpt-3.5-turbo", "gpt-4"
+        messages=messages,
+        max_tokens=4000,
+        response_format={"type": "json_object"},
+        n=1,
+        stop=None,
+        temperature=0.8,
+        frequency_penalty=0.5,
+        presence_penalty=0.5
+    )
+
+    return response.choices[0].message.content
+
 # Main app logic
 if uploaded_file and question:
     input_df = pd.read_csv(uploaded_file)
-    for column in input_df.columns:
-        if all(is_integer(item) for item in input_df[column].astype(str)):
-            input_df[column] = input_df[column].astype(float)
-    categorized_df = categorize_data(input_df)
-    input_df = pd.concat([input_df, categorized_df], axis=1)
-    st.dataframe(input_df.head(20))
+
+     # Analyze the dataset to get dimensions, metrics, and weighting metric
     analysis_result = subset_and_analyze_dimensions(input_df, question)
-    st.text(analysis_result)
-    # Parse the LLM output
     parsed_llm_data = parse_fields(json.loads(analysis_result))
     
     # Define columns for aggregation
     dimension_columns = parsed_llm_data['Dimensions']
-    st.dataframe(dimension_columns)
     metric_to_aggregate = parsed_llm_data['Metrics'][0]
-    st.text(metric_to_aggregate)
     
     # Aggregate metrics and format the result
     result_df = aggregate_metrics_and_format(input_df, dimension_columns, metric_to_aggregate)
+
+    # Derive insights from the dataset
+    insights = derive_insights_from_dataset(result_df, question)
     
-    # Visualize the first 20 rows of the output data frame
-    st.dataframe(result_df.head(20))
+    # Display insights and result_df in the app
+    try:
+        insights_json = json.loads(insights)  # Parse JSON string to dictionary
+        insights_list = insights_json.get('insights', [])
+        insights_df = pd.DataFrame(insights_list)
+
+        # Display insights using Streamlit
+        st.markdown("## Insight Summary", unsafe_allow_html=True)
+        st.table(insights_df)
+
+    except Exception as e:
+        st.error(f"Failed to parse insights: {e}")
+
+    # Display the Top Drivers Table using Streamlit's native method
+    st.write("## Top Drivers Table", unsafe_allow_html=True)
+    # Replace NaN or None with an empty string
+    clean_df = result_df.replace({np.nan: '', None: ''})
+
+    # Display DataFrame without highlighting nulls
+    st.dataframe(clean_df)
