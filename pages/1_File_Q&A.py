@@ -39,6 +39,15 @@ def categorize_data(input_df):
         categorized_data[f"{column}_CATEGORY"] = pd.cut(input_df[column], bins=bins, labels=labels, include_lowest=True)
     return categorized_data[[col for col in categorized_data.columns if "_CATEGORY" in col]]
 
+def gen_table(dimension_columns, metric_to_aggregate, weighting_metric):
+    # Creating a DataFrame from the data
+    table_df = pd.DataFrame({
+        "Type": ["Dimensions", "Metric", "Weighting Metric"],
+        "Value": [", ".join(dimension_columns), metric_to_aggregate, weighting_metric]
+    })
+    
+    return table_df
+
 def parse_fields(data):
     parsed_output = {
         "Dimensions": [],
@@ -53,10 +62,6 @@ def parse_fields(data):
         parsed_output["Weighting_Metric"] = data["Weighting_Metric"]
 
     return parsed_output
-
-import pandas as pd
-import numpy as np
-import itertools
 
 def aggregate_metrics_and_format(df, dimension_columns, measure_column):
     # Check if the measure column exists in the DataFrame.
@@ -135,6 +140,38 @@ def aggregate_metrics_and_format(df, dimension_columns, measure_column):
     final_result_filtered.sort_values(by='measure_median', ascending=False, inplace=True)
 
     return final_result_filtered
+
+def format_and_display_dataset(df):
+    # Add an index column for row numbering
+    df = df.reset_index(drop=True)
+    df.index.name = '#'
+    df.reset_index(inplace=True)
+
+    # Automatically identify dimension columns (excluding 'dimension_combination')
+    # Assuming dimension columns are of type 'object' (typically string-like data in pandas)
+    dimensions = [col for col in df.columns if col != 'dimension_combination' and df[col].dtype == 'object']
+
+    # Define the function for concatenating dimensions
+    def concatenate_dimensions(row, dimensions):
+        values = [str(row[dim]) if pd.notnull(row[dim]) else '' for dim in dimensions]
+        return ' || '.join(filter(None, values))  # Filter out empty strings to avoid unnecessary delimiters
+
+    # Add a column for concatenated dimension values
+    df['concatenated_dimensions'] = df.apply(lambda row: concatenate_dimensions(row, dimensions), axis=1)
+
+    # Specify the order of columns, starting with the index, 'dimension_combination', etc.
+    specified_columns = ['#', 'dimension_combination', 'concatenated_dimensions', 'measure_median', 'median_difference', 'measure_count']
+    
+    # Append the rest of the columns that were not specified
+    new_column_order = specified_columns + [col for col in df.columns if col not in specified_columns]
+    
+    # Reorder the DataFrame columns
+    df = df[new_column_order]
+
+    # Replace NaN values with an empty string
+    df = df.fillna('')
+
+    return df
 
 def subset_and_analyze_dimensions(input_df, user_query):
     # Generate a summary of the DataFrame with additional type information
@@ -222,11 +259,21 @@ def subset_and_analyze_dimensions(input_df, user_query):
     return response.choices[0].message.content
 
 def derive_insights_from_dataset(input_df, user_query):
+    # Check if the DataFrame is empty or has no columns
+    if input_df.empty or input_df.columns.empty:
+        # Return a message or handle the empty DataFrame scenario
+        # For example, return a default response or log a message
+        return json.dumps({"insights": ["No data available for analysis."]})
+
+    # Proceed with the function if the DataFrame is not empty
     summary_statistics = input_df.describe(include='all').to_json()
     top_records = input_df.head(50).to_json()
 
     context = f"""
-        Goal: You are an automated AI analyzer helping a founder identify insights abotu data to answer their question.
+    Goal: 
+    - You are an automated AI analyzer helping a founder identify insights about data to answer their question.
+    - You take an aggregated dataset and a user's question and provide a ranked list of insights about the dataset to help the user answer their question.
+        
 
     What you do: You analyze an aggregated dataset of user data with theqeustion they want to answer about that data.
     - You are trying to derive insigths about the data to help user answer their question.
@@ -251,6 +298,20 @@ def derive_insights_from_dataset(input_df, user_query):
     - Make sure the insights are self contained and actionable.
     - Only return the insights in the JSON. No other information should be included with them.
     - There should be 5-10 insights returned in the JSON. 
+    
+    Sample JSON output: 
+    "insights": [
+        "The highest sales volumes occur in Q4, suggesting seasonal promotions drive significant revenue.",
+        "Sales in the Northeast region outperform other regions by 15%, indicating regional preferences or distribution strengths.",
+        "Product Category B has the highest return rate at 20%, highlighting a potential quality or customer satisfaction issue.",
+        "Repeat customers contribute to 40% of total sales, emphasizing the importance of customer retention strategies.",
+        "Sales performance correlates with marketing spend, with a 0.8 correlation coefficient, suggesting effective marketing.",
+        "The average sales cycle length has increased by 10 days year-over-year, potentially indicating longer decision-making processes.",
+        "Products priced between $50-$100 have the highest conversion rate, suggesting a sweet spot for pricing strategies.",
+        "Customer reviews have a strong influence on sales, with products rated 4 stars or higher seeing a 25% increase in sales.",
+        "Sales reps with more than 5 years of experience have a 30% higher sales quota attainment, highlighting the value of experience.",
+        "The use of discount codes increases cart size by an average of 15%, but also correlates with a 5% lower profit margin per sale."
+    ]
 
     Given the user's query: "{user_query}", analyze the summarized data and the top records to provide tailored insights. The summarized statistics are as follows: {summary_statistics}. The top records from the dataset are: {top_records}.
     - How to analyze: Based on the dataset and focusing on the user's query, identify key insights about the dataset, especially focusing on dimensions, measure averages, counts, and any notable trends observed. Rank these insights from high to low based on their importance and potential impact.
@@ -262,7 +323,7 @@ def derive_insights_from_dataset(input_df, user_query):
     ]
 
     response = openai.chat.completions.create(
-        model="gpt-3.5-turbo", # "gpt-4-1106-preview",  # or "gpt-3.5-turbo", "gpt-4"
+        model="gpt-4-1106-preview", # "gpt-4-1106-preview",  # or "gpt-3.5-turbo", "gpt-4"
         messages=messages,
         max_tokens=4000,
         response_format={"type": "json_object"},
@@ -286,6 +347,13 @@ if uploaded_file and question:
     # Define columns for aggregation
     dimension_columns = parsed_llm_data['Dimensions']
     metric_to_aggregate = parsed_llm_data['Metrics'][0]
+    weighting_metric = parsed_llm_data['Weighting_Metric']
+    
+    table = gen_table(dimension_columns, metric_to_aggregate, weighting_metric)
+
+    # Display the table using Streamlit's markdown capability for better formatting
+    st.write("## Analysis Column Summary")
+    st.dataframe(table)
     
     # Aggregate metrics and format the result
     result_df = aggregate_metrics_and_format(input_df, dimension_columns, metric_to_aggregate)
@@ -297,11 +365,14 @@ if uploaded_file and question:
     try:
         insights_json = json.loads(insights)  # Parse JSON string to dictionary
         insights_list = insights_json.get('insights', [])
-        insights_df = pd.DataFrame(insights_list)
+        insights_df = pd.DataFrame({'Insight': insights_list})
 
-        # Display insights using Streamlit
+        # Convert DataFrame to HTML, omit the header and index
+        insights_html = insights_df.to_html(header=False, index=False)
+
+        # Display insights using Streamlit, without headers
         st.markdown("## Insight Summary", unsafe_allow_html=True)
-        st.table(insights_df)
+        st.markdown(insights_html, unsafe_allow_html=True)
 
     except Exception as e:
         st.error(f"Failed to parse insights: {e}")
@@ -310,6 +381,7 @@ if uploaded_file and question:
     st.write("## Top Drivers Table", unsafe_allow_html=True)
     # Replace NaN or None with an empty string
     clean_df = result_df.replace({np.nan: '', None: ''})
+    formatted_df = format_and_display_dataset(clean_df)
 
     # Display DataFrame without highlighting nulls
-    st.dataframe(clean_df)
+    st.dataframe(formatted_df)
