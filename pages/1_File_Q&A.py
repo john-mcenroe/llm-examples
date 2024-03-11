@@ -4,11 +4,10 @@ import numpy as np
 import openai
 import json
 import itertools
-from tabulate import tabulate
 import plotly.graph_objects as go
 
 # Fixed API key input
-openai_api_key = "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"
+openai_api_key = "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"
 
 st.title("DashGen - Natural Lanauage Analysis")
 
