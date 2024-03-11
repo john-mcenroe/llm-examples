@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 # Fixed API key input
 openai_api_key = "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"
 
-st.title("DashGen - Text to Analysis")
+st.title("DashGen - Natural Lanauage Analysis")
 
 # File uploader and question input
 uploaded_file = st.file_uploader("Upload an article", type=("csv"))
